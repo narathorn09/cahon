@@ -505,7 +505,10 @@ async function loadFolders() {
   foldersAbort?.abort();
   foldersAbort = new AbortController();
   try {
-    state.folderInfo = await api("/api/folders", { signal: foldersAbort.signal });
+    const [folders, ocrInfo] = await Promise.all([api("/api/folders", { signal: foldersAbort.signal }),
+      api("/api/ocr", { signal: foldersAbort.signal }).catch(() => null)]);
+    state.folderInfo = folders;
+    state.ocrInfo = ocrInfo;
     foldersLoadedAt = Date.now();
     renderFolderPanel();
   } catch (e) { /* aborted or failed: the panel just keeps its last state */ }
@@ -562,7 +565,44 @@ function renderFolderPanel() {
   if (head) head.replaceWith(newHead); else box.replaceChildren(newHead);
   box.querySelector(".fp-folders")?.remove();
   if (chips) box.append(chips);
+  box.querySelector(".fp-ocr")?.remove();
+  const ocrLine = ocrRow();
+  if (ocrLine) box.append(ocrLine);
   box.classList.remove("hidden");
+}
+
+/** OCR on the home screen: switch it on or off, see what is read and what waits,
+    and watch it read (it runs after each scan, in the background, at low priority). */
+function ocrRow() {
+  const o = state.ocrInfo;
+  if (!o) return null;
+  const n = (x) => Number(x || 0).toLocaleString();
+  const row = el("div", { class: `fp-ocr${o.reading ? " reading" : ""}` });
+  const head = el("div", { class: "fp-ocr-head" }, icon("scan"), el("strong", {}, "OCR อัตโนมัติ"));
+  if (!o.available) {
+    row.append(head, el("span", { class: "fp-ocr-text" }, "ยังใช้ไม่ได้: ไม่พบ Tesseract (ดู ตั้งค่า → การสแกนไฟล์)"));
+    return row;
+  }
+  const sw = toggle(o.enabled, async (v) => {
+    await saveScanSettings({ ocr: v });
+    toast(v ? "เปิด OCR อัตโนมัติแล้ว" : "ปิด OCR อัตโนมัติแล้ว", v ? "happy" : "sleepy");
+    loadFolders();
+  }, "OCR อัตโนมัติ");
+  let text, action = null, bar = null;
+  if (!o.enabled) {
+    text = "ปิดอยู่ · ยังอ่านทีละไฟล์ได้ด้วยปุ่ม อ่านด้วย OCR ในรายละเอียดไฟล์";
+  } else if (o.reading && o.progress) {
+    const p = o.progress, pct = p.total ? Math.floor((p.done / p.total) * 100) : null;
+    text = `กำลังอ่าน ${p.current || "…"}${p.pages > 1 ? ` · หน้า ${p.page} / ${p.pages}` : ""} · ${n(p.done)} / ${n(p.total)} ไฟล์${p.throttled ? " · พักชั่วคราว" : ""}`;
+    bar = el("div", { class: `progress${pct == null ? " indeterminate" : ""}` }, el("span", { style: pct == null ? "" : `width:${pct}%` }));
+    action = btn("หยุด", stopScan, "ghost sm");
+  } else {
+    text = `อ่านแล้ว ${n(o.done)} ไฟล์${o.none ? ` · ไม่มีข้อความ ${n(o.none)}` : ""}${o.pending ? ` · รออ่าน ${n(o.pending)} ไฟล์` : " · อ่านครบแล้ว"}`;
+    if (o.pending && !o.scanning) action = btn("อ่านเลย", startScan, "secondary sm");
+    if (o.pending && o.scanning) text += " (เริ่มหลังสแกนไฟล์เสร็จ)";
+  }
+  row.append(head, sw, el("span", { class: "fp-ocr-text", title: text }, text), action || "", bar || "");
+  return row;
 }
 
 const sameOrInside = (child, parent) => {
@@ -727,8 +767,24 @@ function resultMeta(r) {
   return [fmtShortDate(r.updated_at), ...(r.tags || []).map((t) => `#${t}`)];
 }
 
+/** For a file found by its folder name ("test" in …/load-test/k6.png): the folders
+    from the one that matched to the file, so the row shows why it is here. */
+function matchedFolder(r, t) {
+  if (r.kind !== "file" || !t.length || !r.path) return null;
+  const title = (r.title || "").toLowerCase();
+  const missing = t.map((w) => w.toLowerCase()).filter((w) => !title.includes(w));
+  if (!missing.length) return null;
+  const parts = r.path.split(/[\\/]/).filter(Boolean).slice(0, -1);
+  let first = -1;
+  parts.forEach((p, k) => { if (first < 0 && missing.some((w) => p.toLowerCase().includes(w))) first = k; });
+  if (first < 0) return null;
+  const sep = r.path.includes("\\") && !r.path.includes("/") ? "\\" : "/";
+  return (first > 0 ? "…" + sep : "") + parts.slice(first).join(sep) + sep;
+}
+
 function rowEl(r, i, t, animate) {
   const meta = resultMeta(r).filter(Boolean);
+  const folder = matchedFolder(r, t);
   return el("li", {
     class: `row${animate ? " reveal" : ""}${i === state.selected ? " selected" : ""}`, style: animate ? `--i:${Math.min(i, 12)}` : null,
     onclick: () => { select(i); if (!isSide()) openDetail(); },
@@ -738,6 +794,7 @@ function rowEl(r, i, t, animate) {
     el("div", { class: "copy" },
       el("div", { class: "title" }, highlight(r.title, t)),
       meta.length ? el("div", { class: "meta" }, meta.map((m, j) => el("span", { class: j ? "dot" : "" }, highlight(m, t)))) : null,
+      folder ? el("div", { class: "where", title: `เจอในชื่อโฟลเดอร์: ${r.path}` }, icon("folder"), el("span", {}, highlight(folder, t))) : null,
       r.snippet && r.kind !== "password" && t.length ? el("div", { class: "snip" }, highlight(r.snippet, t)) : null),
     canView(r) ? el("div", { class: "row-actions" },
       btn("ดูเนื้อหา", (e) => { e.stopPropagation(); openViewer(r); }, "secondary sm", "lines", { title: "ดูเนื้อหาพร้อมเลขบรรทัด" })) : null);
@@ -1969,8 +2026,8 @@ function ocrRows(s, ix) {
   }
   return [
     state,
-    pref("อ่าน PDF ที่เป็นภาพสแกน", "หน้าที่ไม่มีข้อความ (สแกน/ถ่ายรูปเอกสาร) จะถูกอ่านด้วย OCR แล้วค้นหาได้เหมือนข้อความปกติ",
-      toggle(set.ocr, (v) => saveScanSettings({ ocr: v }), "อ่าน PDF ที่เป็นภาพสแกน")),
+    pref("OCR อัตโนมัติ", "หลังสแกนไฟล์เสร็จ อ่าน PDF สแกน (หน้าที่ไม่มีข้อความ) และรูปภาพเองเบื้องหลัง แล้วค้นหาได้เหมือนข้อความปกติ · ดูความคืบหน้าได้ที่หน้าแรก · ปิดแล้วยังกด อ่านด้วย OCR ทีละไฟล์ได้",
+      toggle(set.ocr, (v) => saveScanSettings({ ocr: v }), "OCR อัตโนมัติ")),
     pref("อ่านข้อความในรูปภาพ", "jpg, png, gif, tiff, bmp, webp เช่น รูปถ่ายเอกสาร ภาพหน้าจอ สลิป · รูปที่ไม่มีตัวหนังสือ (คน วิว) จะถูกข้ามเอง เพราะเก็บเฉพาะบรรทัดที่อ่านได้ชัด",
       toggle(set.ocr_images, (v) => saveScanSettings({ ocr_images: v }), "อ่านรูปภาพด้วย")),
     pref("จำนวนหน้าสูงสุดต่อไฟล์", "ประมาณ 1–2 วินาทีต่อหน้า",
