@@ -107,3 +107,24 @@ def test_ocr_on_request(tmp_path):
     assert job["state"] == "done" and job["chars"] > 0 and job["pages"] == 1
     hits = c.get("/api/search", params={"q": "4417"}).json()["results"]
     assert [h["id"] for h in hits] == [item["id"]]
+
+
+@needs_tesseract
+def test_ocr_info_counts_and_switch(tmp_path):
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    scanned_pdf(docs / "scan.pdf", ["INVOICE 4417 PAID"])
+    c = client_for(tmp_path, [docs])
+    settings = c.get("/api/status").json()["indexing"]["settings"]
+    c.put("/api/scan/settings", json={**settings, "ocr": False, "auto": False})
+    c.post("/api/scan/start")
+    wait_scan(c, 1)
+    info = c.get("/api/ocr").json()
+    assert info["enabled"] is False and info["pending"] == 0 and info["available"]
+    c.put("/api/scan/settings", json={**settings, "ocr": True, "auto": False})   # switching on starts reading
+    for _ in range(300):
+        info = c.get("/api/ocr").json()
+        if not info["scanning"] and info["done"] == 1:
+            break
+        time.sleep(0.1)
+    assert info["enabled"] and info["done"] == 1 and info["pending"] == 0 and not info["reading"]

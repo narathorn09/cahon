@@ -80,3 +80,22 @@ def test_api(tmp_path):
     f = c.get("/api/search/facets", params={"q": "รายงาน"}).json()
     assert f["counts"] == {"pdf": 1, "word": 1, "text": 1} and f["order"][0] == "pdf" and f["labels"]["word"] == "Word"
     assert c.get("/api/search/count", params={"q": "", "types": "text"}).json()["total"] == 1
+
+
+def test_name_matches_rank_before_folder_matches(tmp_path):
+    # "test" in the file name beats "test" only in a folder name, which beats "test" only in the text.
+    import os
+
+    docs = tmp_path / "docs"
+    (docs / "load-test").mkdir(parents=True)
+    newest = 1_800_000_000
+    for path, body, age in [("load-test/k6.png.txt", "graph", 0), ("test-result.txt", "zip", 50), ("notes.txt", "a test inside", 10)]:
+        f = docs / path
+        f.write_text(body)
+        os.utime(f, (newest - age, newest - age))
+    db = Database(tmp_path / "s.db")
+    Indexer(db, [str(docs)], ScanSettings(ocr=False)).run()
+    titles = [r["title"] for r in db.search("test")]
+    assert titles == ["test-result.txt", "k6.png.txt", "notes.txt"]
+    full = db.page("test", None, "relevance", 0, 50)
+    assert [r["title"] for r in full["results"]] == titles

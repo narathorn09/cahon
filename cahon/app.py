@@ -514,6 +514,32 @@ def create_app(config: Config) -> FastAPI:
         indexer.trigger()
         return {"ok": True}
 
+    # OCR at a glance for the home screen: on/off, how many files are read and how many wait,
+    # and the live progress while the scanner reads them (it does, after each scan, in the background).
+    ocr_pending_cache = {"at": 0.0, "n": 0, "key": None}
+
+    @app.get("/api/ocr", dependencies=[Depends(require_auth)])
+    def ocr_info():
+        settings, eng, summary = indexer.settings, ocr.engine().info(), db.ocr_summary()
+        pr = indexer.status().get("progress") or {}
+        reading = bool(indexer.running and pr.get("phase") == "ocr")
+        if reading:
+            pending = max(0, int(pr.get("total") or 0) - int(pr.get("done") or 0))
+        elif not (settings.ocr and eng["available"]):
+            pending = 0
+        else:
+            # A pass over the file list: redone when something changed (files, OCR results,
+            # settings), or after a minute, not on every poll.
+            key = (db.counts()["file"], summary["done"], summary["none"], summary["failed"], settings.ocr_images)
+            if key != ocr_pending_cache["key"] or time.monotonic() - ocr_pending_cache["at"] > 60:
+                ocr_pending_cache.update(at=time.monotonic(), n=len(indexer.ocr_pending()), key=key)
+            pending = ocr_pending_cache["n"]
+        return {
+            "enabled": settings.ocr, "images": settings.ocr_images, "available": eng["available"], "thai": eng["thai"],
+            **summary, "pending": pending, "reading": reading, "scanning": indexer.running,
+            "progress": {k: pr.get(k) for k in ("done", "total", "current", "page", "pages", "rate", "throttled")} if reading else None,
+        }
+
     @app.post("/api/scan/stop", dependencies=[Depends(require_auth)])
     def scan_stop():
         return {"stopped": indexer.stop()}
