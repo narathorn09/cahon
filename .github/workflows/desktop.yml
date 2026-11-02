@@ -181,7 +181,13 @@ jobs:
         run: python tools/smoke_desktop.py "dist/CAHON.app/Contents/MacOS/CAHON"
       - name: Clipboard (copy button in the app window)
         run: python tools/check_clipboard.py
+      # WebKit is current only on the macOS 15 runner: Playwright's WebKit for macOS 14 is frozen
+      # and hung at launch. One run covers it: the layout is the same CSS on both chips.
       - name: Results list in WebKit (the engine of the Mac app window)
+        if: matrix.arch == 'x86_64'
+        timeout-minutes: 10
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           pip install playwright
           python -m playwright install webkit
