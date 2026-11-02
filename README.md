@@ -34,14 +34,37 @@
 
 แอปเปิดเป็นหน้าต่างของตัวเอง มี OCR ภาษาไทย/อังกฤษ และตัวอ่านไฟล์ภาษา Rust ในตัว ไม่ต้องลง Python, Docker หรือ Tesseract เพิ่ม ครั้งแรกจะสแกน Documents, Desktop และ Downloads ให้เอง (เปลี่ยนได้ในตั้งค่า) ข้อมูลเก็บไว้ที่ `%LOCALAPPDATA%\CAHON` (Windows) หรือ `~/Library/Application Support/CAHON` (Mac) ถอนการติดตั้งแล้วข้อมูลยังอยู่
 
-**ครั้งแรกที่เปิด ระบบจะเตือน** เพราะตัวติดตั้งยังไม่ได้เซ็นด้วยใบรับรองที่ซื้อจาก Microsoft/Apple:
+**ครั้งแรกที่เปิด ระบบอาจเตือน** ถ้าตัวติดตั้งยังไม่ได้เซ็นด้วยใบรับรองของ Microsoft/Apple (ดู [เซ็นแอป Mac](#เซ็นแอป-mac-ไม่ให้ขึ้นเตือน)):
 - **Windows**: หน้าจอ "Windows protected your PC" → กด **More info** → **Run anyway**
-- **Mac**: เปิดแล้วถูกบล็อก → **System Settings → Privacy & Security** → เลื่อนลงไปกด **Open Anyway** (หรือคลิกขวาที่แอป → Open)
+- **Mac** (ขึ้น *"Apple could not verify "CAHON" is free of malware…"*): กด **Done** ก่อน แล้วไปที่ **System Settings → Privacy & Security** เลื่อนลงล่างสุด กด **Open Anyway** แล้วใส่รหัสเครื่อง (macOS 15 ขึ้นไป คลิกขวา → Open ใช้ไม่ได้แล้ว) หรือพิมพ์ใน Terminal ครั้งเดียว:
+
+  ```bash
+  xattr -dr com.apple.quarantine /Applications/CAHON.app
+  ```
 - macOS จะถามสิทธิ์เข้าโฟลเดอร์ Documents/Desktop/Downloads ครั้งแรก ให้กด Allow
 
 ### อัปเดตในแอป
 
 **ตั้งค่า → เกี่ยวกับและอัปเดต**: แอปตรวจหาเวอร์ชันใหม่วันละครั้ง (ปิดได้) ถ้ามี จะขึ้นข้อความแจ้ง กด **อัปเดตเลย** แอปจะดาวน์โหลดตัวติดตั้งของเครื่องนั้น ตรวจ SHA-256 กับค่าที่ GitHub ประกาศ แล้วติดตั้งและเปิดใหม่เอง ข้อมูลไม่หาย (บน Mac ถ้าแอปอยู่ในโฟลเดอร์ที่เขียนไม่ได้ จะเปิดไฟล์ .dmg ให้ลากไปทับเอง)
+
+### เซ็นแอป Mac (ไม่ให้ขึ้นเตือน)
+
+macOS จะเปิดแอปได้ทันทีโดยไม่เตือนก็ต่อเมื่อแอปเซ็นด้วยใบรับรอง **Developer ID** และส่งให้ Apple ตรวจ (notarize) แล้ว CI ทำให้อัตโนมัติเมื่อมี secrets ครบ ถ้าไม่มีจะเซ็นแบบ ad hoc เหมือนเดิม (ใช้ได้ แต่ขึ้นเตือนครั้งแรก)
+
+1. สมัคร [Apple Developer Program](https://developer.apple.com/programs/) (ปีละ 99 USD)
+2. สร้างใบรับรอง **Developer ID Application** (Xcode → Settings → Accounts → Manage Certificates → + หรือที่ developer.apple.com → Certificates) แล้ว export จาก Keychain Access เป็นไฟล์ `.p12` พร้อมตั้งรหัส
+3. สร้าง **app-specific password** ที่ [account.apple.com](https://account.apple.com) → Sign-In and Security → App-Specific Passwords
+4. ใส่ใน GitHub: repo → **Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret | ค่า |
+|---|---|
+| `MACOS_CERT_P12` | ไฟล์ .p12 แบบ base64: `base64 -i DeveloperID.p12 \| pbcopy` แล้ววาง |
+| `MACOS_CERT_PASSWORD` | รหัสที่ตั้งตอน export .p12 |
+| `APPLE_ID` | อีเมล Apple ID ของบัญชี Developer |
+| `APPLE_APP_PASSWORD` | app-specific password จากข้อ 3 |
+| `APPLE_TEAM_ID` | Team ID 10 ตัว (developer.apple.com → Membership) |
+
+จากนั้นปล่อยเวอร์ชันใหม่ตามปกติ CI จะเซ็นทุกไฟล์ในแอป (`packaging/macos/sign.sh`, hardened runtime) ทดสอบเปิดแอปที่เซ็นแล้ว ส่ง .dmg ให้ Apple ตรวจ รอผล แล้วแนบผลไว้ในไฟล์ (staple) ถ้า Apple ไม่ผ่าน CI จะแสดง log ของ Apple และไม่ปล่อย Release
 
 ### ออกเวอร์ชันใหม่ (สำหรับผู้ดูแลโปรเจกต์)
 

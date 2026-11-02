@@ -107,6 +107,15 @@ jobs:
           - runner: macos-15-intel
             arch: x86_64
     runs-on: ${{ matrix.runner }}
+    # Developer ID signing + Apple notarization, so Gatekeeper opens the app without
+    # "Apple could not verify…". Runs only when these repository secrets are set
+    # (README: "เซ็นแอป Mac"); without them the app is signed ad hoc as before.
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -149,7 +158,25 @@ jobs:
         run: |
           python packaging/make_icon.py packaging/build/icons
           pyinstaller packaging/cahon.spec --noconfirm --distpath dist --workpath build
-          codesign --force --deep -s - "dist/CAHON.app"
+      - name: Sign (ad hoc without the Apple secrets)
+        if: env.MACOS_CERT_P12 == ''
+        run: codesign --force --deep -s - "dist/CAHON.app"
+      - name: Sign with Developer ID
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          KC="$RUNNER_TEMP/signing.keychain-db"; KC_PASS="$(openssl rand -hex 16)"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KC_PASS" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KC_PASS" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KC_PASS" "$KC" > /dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+          IDENTITY=$(security find-identity -v -p codesigning "$KC" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')
+          [ -n "$IDENTITY" ] || { echo "no Developer ID Application certificate in MACOS_CERT_P12"; exit 1; }
+          echo "MAC_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          packaging/macos/sign.sh "dist/CAHON.app" "$IDENTITY"
       - name: Smoke test
         run: python tools/smoke_desktop.py "dist/CAHON.app/Contents/MacOS/CAHON"
       - name: Clipboard (copy button in the app window)
@@ -161,6 +188,22 @@ jobs:
           ln -s /Applications dmg/Applications
           hdiutil create -volname "CAHON" -srcfolder dmg -ov -format UDZO \
             "dist/CAHON-${APP_VERSION}-macos-${{ matrix.arch }}.dmg"
+      - name: Notarize (Apple checks it; Gatekeeper then opens it without a warning)
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          DMG="dist/CAHON-${APP_VERSION}-macos-${{ matrix.arch }}.dmg"
+          codesign --force --timestamp --sign "$MAC_IDENTITY" "$DMG"
+          xcrun notarytool submit "$DMG" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --wait --timeout 30m --output-format json | tee notary.json
+          python3 -c "import json,sys; s=json.load(open('notary.json'))['status']; print('notary:', s); sys.exit(s != 'Accepted')" || {
+            id=$(python3 -c "import json; print(json.load(open('notary.json'))['id'])")
+            xcrun notarytool log "$id" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID"; exit 1; }
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
+      - name: Remove the signing keychain
+        if: always() && env.MACOS_CERT_P12 != ''
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
       - uses: actions/upload-artifact@v4
         with:
           name: CAHON-macos-${{ matrix.arch }}
