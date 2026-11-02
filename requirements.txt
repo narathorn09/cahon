@@ -12,3 +12,4 @@ pypdfium2>=4.30
 pillow>=10.0
 xlrd>=2.0
 olefile>=0.46
+certifi>=2024.2         # root certificates for HTTPS (update check): macOS Python has none of its own
