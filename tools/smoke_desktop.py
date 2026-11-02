@@ -63,6 +63,14 @@ def main() -> int:
             if file not in titles:
                 failures.append(word)
         assert not failures, f"not found: {failures}"
+        # The update check must get through HTTPS (macOS Python has no root certificates of its own).
+        # A refusal from GitHub (rate limit on shared CI addresses) is fine; a certificate error is not.
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/update/check", method="POST", data=b"")
+        with urllib.request.urlopen(req, timeout=40) as r:
+            upd = json.loads(r.read())
+        print("update check:", json.dumps({k: upd.get(k) for k in ("state", "latest", "error")}, ensure_ascii=False))
+        err = upd.get("error") or ""
+        assert "CERTIFICATE" not in err and "SSL" not in err, f"update check cannot use HTTPS: {err}"
         ok = True
     except AssertionError as exc:
         print("FAILED:", exc)

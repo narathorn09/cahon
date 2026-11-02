@@ -68,7 +68,7 @@ def test_download_checks_sha256(tmp_path, monkeypatch):
         def __exit__(self, *a):
             return False
 
-    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0: Resp(data))
+    monkeypatch.setattr(urllib.request, "urlopen", lambda req, timeout=0, context=None: Resp(data))
     u = updater.Updater(tmp_path, enabled=True)
     raw = asset("Setup.exe", data)
     good = {"name": raw["name"], "url": raw["browser_download_url"], "size": raw["size"], "digest": raw["digest"]}
@@ -121,3 +121,16 @@ def test_new_repository_name_first_then_the_old_one(tmp_path):
     st = updater.Updater(tmp_path, enabled=True, fetch=fetch).check()
     assert st["latest"] == "99.0.0"
     assert [u.split("/repos/")[1].split("/releases")[0] for u in asked] == ["narathorn09/cahon", "narathorn09/search-anything"]
+
+
+def test_https_trusts_certifi_roots_too(monkeypatch):
+    # macOS Python reads no system certificates: the update check failed there with
+    # CERTIFICATE_VERIFY_FAILED. The context must carry certifi's roots as well.
+    import ssl
+
+    from cahon import updater
+
+    monkeypatch.setattr(ssl.SSLContext, "load_default_certs", lambda self, purpose=None: None)  # an empty system store
+    ctx = updater._ssl_context()
+    assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+    assert ctx.cert_store_stats()["x509_ca"] > 100
