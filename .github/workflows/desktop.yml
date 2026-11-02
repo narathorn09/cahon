@@ -181,6 +181,17 @@ jobs:
         run: python tools/smoke_desktop.py "dist/CAHON.app/Contents/MacOS/CAHON"
       - name: Clipboard (copy button in the app window)
         run: python tools/check_clipboard.py
+      - name: Results list in WebKit (the engine of the Mac app window)
+        run: |
+          pip install playwright
+          python -m playwright install webkit
+          LAYOUT_SHOT=dist/layout-webkit-${{ matrix.arch }}.png python tools/check_layout.py "dist/CAHON.app/Contents/MacOS/CAHON"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: layout-webkit-${{ matrix.arch }}
+          path: dist/layout-webkit-*.png
+          if-no-files-found: ignore
       - name: Disk image
         run: |
           mkdir -p dmg
