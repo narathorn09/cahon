@@ -12,6 +12,7 @@ Needs: pip install playwright && python -m playwright install webkit
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,9 @@ def get(port: int, path: str):
 
 
 def main() -> int:
+    if hasattr(signal, "alarm"):  # never hang a release: the whole check gets 4 minutes
+        signal.signal(signal.SIGALRM, lambda *_: (_ for _ in ()).throw(AssertionError("timed out after 4 minutes")))
+        signal.alarm(240)
     exe = Path(sys.argv[1]).resolve()
     engine = sys.argv[2] if len(sys.argv) > 2 else "webkit"
     tmp = Path(tempfile.mkdtemp(prefix="cahon-layout-"))
@@ -54,10 +58,11 @@ def main() -> int:
                 break
             time.sleep(1)
         with sync_playwright() as p:
-            browser = getattr(p, engine).launch()
+            browser = getattr(p, engine).launch(timeout=60000)
+            print(f"{engine} started", flush=True)
             page = browser.new_page(viewport={"width": 1280, "height": 800})
             page.add_init_script("localStorage.setItem('cahon-tour-done', '1')")
-            page.goto(f"http://127.0.0.1:{port}/")
+            page.goto(f"http://127.0.0.1:{port}/", timeout=30000)
             page.wait_for_selector("#results li.row", timeout=20000)
             page.wait_for_timeout(1200)
             info = page.evaluate("""() => {
