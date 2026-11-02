@@ -9,6 +9,7 @@ const ICONS = {
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   x: '<path d="M6 6l12 12M18 6 6 18"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
   up: '<path d="M12 19V5M6 11l6-6 6 6"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
   note: '<path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5M9 9h6M9 12.5h4"/>',
@@ -358,7 +359,8 @@ async function search() {
 }
 
 // ------------------------------------------------------- file type filter
-const typeFilterOn = () => prefs.typeFilter && (state.kind === "" || state.kind === "file");
+// Only once something is typed: the home screen stays quiet.
+const typeFilterOn = () => prefs.typeFilter && !!$("#q").value.trim() && (state.kind === "" || state.kind === "file");
 let facetsAbort = null;
 
 /** Counts per file type for the current words (refetched only when they change). */
@@ -514,73 +516,97 @@ async function loadFolders() {
   } catch (e) { /* aborted or failed: the panel just keeps its last state */ }
 }
 
+let fpOpen = false;
+try { fpOpen = localStorage.getItem("cahon-folders-open") === "1"; } catch { /* ignore */ }
+
+function setFolderPanelOpen(v) {
+  fpOpen = v;
+  try { localStorage.setItem("cahon-folders-open", v ? "1" : "0"); } catch { /* ignore */ }
+  renderFolderPanel();
+}
+
+/* One quiet line: the mascot, what is searched (or what it is doing right now,
+   with a thin progress bar), and "จัดการ" to open the folders, scan and OCR
+   controls. With no folders yet it stays open as the first-run guide. */
 function renderFolderPanel() {
   const box = $("#folder-panel");
   const info = state.folderInfo;
   if (!folderPanelOn() || !info || !state.status) { box.classList.add("hidden"); return; }
   const ix = state.status.indexing;
   const pr = ix.progress || {};
+  const o = state.ocrInfo;
   const folders = info.folders;
   const busy = folders.find((f) => f.scanning);
   const files = folders.reduce((n, f) => n + f.files, 0);
-  const pct = ix.running && pr.total ? Math.floor((pr.done / pr.total) * 100) : null;
+  const n = (x) => Number(x || 0).toLocaleString();
+  const empty = !folders.length;
+  const open = empty || fpOpen;
 
-  let mood = "idle", title, sub;
-  if (!folders.length) {
+  let mood = "idle", main, sub = "", pct = null, live = false;
+  if (empty) {
     mood = "sleepy";
-    title = "ยังไม่ได้เลือกโฟลเดอร์";
+    main = "ยังไม่ได้เลือกโฟลเดอร์";
     sub = info.can_edit ? "เลือกโฟลเดอร์ที่อยากให้น้องคาหนช่วยค้น แล้วน้องจะสแกนให้เอง"
       : "โฟลเดอร์ถูกกำหนดตอนเปิดแอป (เช่น --folder) · ยังอัปโหลดไฟล์มาค้นได้";
-  } else if (ix.running) {
-    mood = "working";
-    const where = busy ? busy.name : "โฟลเดอร์";
-    title = pr.phase === "stopping" ? "กำลังหยุดสแกน…"
-      : pr.phase === "ocr" ? `กำลังอ่านภาพสแกนใน ${where}` : `กำลังสแกน ${where}`;
-    sub = pr.phase === "walking" ? `สำรวจแล้ว ${Number(pr.scanned || 0).toLocaleString()} ไฟล์…`
-      : pr.total ? `${pr.done.toLocaleString()} / ${pr.total.toLocaleString()} ไฟล์ · ${pct}%${pr.current ? ` · ${pr.current}` : ""}` : "กำลังเริ่ม…";
+  } else if (ix.running && pr.phase !== "ocr") {
+    mood = "working"; live = true;
+    pct = pr.total ? Math.floor((pr.done / pr.total) * 100) : null;
+    main = pr.phase === "stopping" ? "กำลังหยุดสแกน…" : `กำลังสแกน ${busy ? busy.name : "โฟลเดอร์"}`;
+    sub = pr.phase === "walking" ? `สำรวจแล้ว ${n(pr.scanned)} ไฟล์…` : pr.total ? `${n(pr.done)} / ${n(pr.total)} ไฟล์ · ${pct}%` : "กำลังเริ่ม…";
+  } else if (o?.reading && o.progress) {
+    const p = o.progress;
+    mood = "working"; live = true;
+    pct = p.total ? Math.floor((p.done / p.total) * 100) : null;
+    main = "กำลังอ่านภาพสแกน (OCR)";
+    sub = `${n(p.done)} / ${n(p.total)} ไฟล์${p.throttled ? " · พักชั่วคราว" : ""}`;
   } else {
     const last = ix.last;
     mood = last && Date.now() / 1000 - last.finished_at < 60 && !last.stopped ? "happy" : "idle";
-    title = `ค้นหาใน ${folders.length.toLocaleString()} โฟลเดอร์ · ${files.toLocaleString()} ไฟล์`;
-    sub = last ? `สแกนล่าสุด ${fmtAgo(last.finished_at)}${ix.settings.auto ? ` · สแกนอัตโนมัติทุก ${ix.settings.interval_minutes} นาที` : ""}` : "ยังไม่เคยสแกน";
+    main = `${n(folders.length)} โฟลเดอร์ · ${n(files)} ไฟล์`;
+    sub = last ? `สแกนล่าสุด ${fmtAgo(last.finished_at)}` : "ยังไม่เคยสแกน";
+    if (o?.available && o.enabled) sub += o.pending ? ` · OCR รออ่าน ${n(o.pending)}` : " · OCR อ่านครบแล้ว";
   }
 
-  const head = box.querySelector(".fp-head");
-  const mascot = head?.querySelector(".mascot") || mascotEl(mood, "small");
+  const oldBar = box.querySelector(".fp-bar");
+  const mascot = oldBar?.querySelector(".mascot") || mascotEl(mood, "small");
   setMood(mascot, mood);
-  const actions = el("div", { class: "fp-actions" },
-    info.can_edit ? btn("เพิ่มโฟลเดอร์", addFolder, folders.length ? "secondary sm" : "primary sm", "plus") : null,
-    folders.length && !ix.running ? btn("สแกนเลย", startScan, "ghost sm") : null);
-  const newHead = el("div", { class: "fp-head" }, mascot,
-    el("div", { class: "fp-text" }, el("strong", {}, title), el("span", {}, sub),
-      ix.running ? el("div", { class: `progress${pct == null ? " indeterminate" : ""}` }, el("span", { style: pct == null ? "" : `width:${pct}%` })) : null),
-    actions);
-  const chips = folders.length ? el("ul", { class: "fp-folders" }, folders.map((f) => el("li", {
-    class: `fp-folder${f.scanning ? " scanning" : ""}${f.exists ? "" : " missing"}`, title: f.path,
-  }, f.scanning ? el("span", { class: "dot-live on" }) : icon("folder"),
-  el("span", { class: "name" }, f.name),
-  el("span", { class: "n" }, f.exists ? `${f.files.toLocaleString()} ไฟล์` : "หาไม่เจอ"),
-  info.can_edit ? el("button", { type: "button", class: "fp-remove", title: `เอา ${f.name} ออก`, "aria-label": `เอา ${f.name} ออก`,
-    onclick: () => removeFolder(f) }, icon("x")) : null))) : null;
-  if (head) head.replaceWith(newHead); else box.replaceChildren(newHead);
-  box.querySelector(".fp-folders")?.remove();
-  if (chips) box.append(chips);
-  box.querySelector(".fp-ocr")?.remove();
-  const ocrLine = ocrRow();
-  if (ocrLine) box.append(ocrLine);
+  const bar = el("div", { class: `fp-bar${live ? " live" : ""}` }, mascot,
+    el("div", { class: "fp-text" }, el("strong", {}, main), sub ? el("span", {}, sub) : null),
+    empty ? (info.can_edit ? btn("เพิ่มโฟลเดอร์", addFolder, "primary sm", "plus") : null)
+      : el("button", { type: "button", class: "fp-more", "aria-expanded": String(open), onclick: () => setFolderPanelOpen(!fpOpen) },
+        "จัดการ", icon("chevron")),
+    live ? el("div", { class: `progress${pct == null ? " indeterminate" : ""}` }, el("span", { style: pct == null ? "" : `width:${pct}%` })) : null);
+
+  const parts = [bar];
+  if (open && !empty) {
+    parts.push(el("ul", { class: "fp-folders" }, folders.map((f) => el("li", {
+      class: `fp-folder${f.scanning ? " scanning" : ""}${f.exists ? "" : " missing"}`, title: f.path,
+    }, f.scanning ? el("span", { class: "dot-live on" }) : icon("folder"),
+    el("span", { class: "name" }, f.name),
+    el("span", { class: "n" }, f.exists ? `${n(f.files)} ไฟล์` : "หาไม่เจอ"),
+    info.can_edit ? el("button", { type: "button", class: "fp-remove", title: `เอา ${f.name} ออก`, "aria-label": `เอา ${f.name} ออก`,
+      onclick: () => removeFolder(f) }, icon("x")) : null)),
+    info.can_edit ? el("li", {}, el("button", { type: "button", class: "fp-add", onclick: addFolder }, icon("plus"), "เพิ่มโฟลเดอร์")) : null));
+    parts.push(el("div", { class: "fp-row" }, icon("reset"),
+      el("span", { class: "fp-row-text" }, ix.running ? "กำลังสแกนอยู่" : `สแกนอัตโนมัติ${ix.settings.auto ? ` ทุก ${ix.settings.interval_minutes} นาที` : " ปิดอยู่"}`),
+      ix.running ? btn("หยุด", stopScan, "ghost sm") : btn("สแกนเลย", startScan, "ghost sm")));
+    const ocr = ocrRow();
+    if (ocr) parts.push(ocr);
+  }
+  box.classList.toggle("open", open && !empty);
+  box.classList.toggle("empty", empty);
+  box.replaceChildren(...parts);
   box.classList.remove("hidden");
 }
 
-/** OCR on the home screen: switch it on or off, see what is read and what waits,
-    and watch it read (it runs after each scan, in the background, at low priority). */
+/** OCR in the opened panel: switch it on or off, see what is read and what waits. */
 function ocrRow() {
   const o = state.ocrInfo;
   if (!o) return null;
   const n = (x) => Number(x || 0).toLocaleString();
-  const row = el("div", { class: `fp-ocr${o.reading ? " reading" : ""}` });
-  const head = el("div", { class: "fp-ocr-head" }, icon("scan"), el("strong", {}, "OCR อัตโนมัติ"));
+  const row = el("div", { class: "fp-row fp-ocr" });
   if (!o.available) {
-    row.append(head, el("span", { class: "fp-ocr-text" }, "ยังใช้ไม่ได้: ไม่พบ Tesseract (ดู ตั้งค่า → การสแกนไฟล์)"));
+    row.append(icon("scan"), el("span", { class: "fp-row-text" }, "OCR ยังใช้ไม่ได้: ไม่พบ Tesseract (ดู ตั้งค่า → การสแกนไฟล์)"));
     return row;
   }
   const sw = toggle(o.enabled, async (v) => {
@@ -588,20 +614,18 @@ function ocrRow() {
     toast(v ? "เปิด OCR อัตโนมัติแล้ว" : "ปิด OCR อัตโนมัติแล้ว", v ? "happy" : "sleepy");
     loadFolders();
   }, "OCR อัตโนมัติ");
-  let text, action = null, bar = null;
+  let text, action = null;
   if (!o.enabled) {
-    text = "ปิดอยู่ · ยังอ่านทีละไฟล์ได้ด้วยปุ่ม อ่านด้วย OCR ในรายละเอียดไฟล์";
+    text = "OCR อัตโนมัติ ปิดอยู่ · ยังกดอ่านทีละไฟล์ได้";
   } else if (o.reading && o.progress) {
-    const p = o.progress, pct = p.total ? Math.floor((p.done / p.total) * 100) : null;
-    text = `กำลังอ่าน ${p.current || "…"}${p.pages > 1 ? ` · หน้า ${p.page} / ${p.pages}` : ""} · ${n(p.done)} / ${n(p.total)} ไฟล์${p.throttled ? " · พักชั่วคราว" : ""}`;
-    bar = el("div", { class: `progress${pct == null ? " indeterminate" : ""}` }, el("span", { style: pct == null ? "" : `width:${pct}%` }));
+    const p = o.progress;
+    text = `OCR กำลังอ่าน ${p.current || "…"}${p.pages > 1 ? ` · หน้า ${p.page} / ${p.pages}` : ""}`;
     action = btn("หยุด", stopScan, "ghost sm");
   } else {
-    text = `อ่านแล้ว ${n(o.done)} ไฟล์${o.none ? ` · ไม่มีข้อความ ${n(o.none)}` : ""}${o.pending ? ` · รออ่าน ${n(o.pending)} ไฟล์` : " · อ่านครบแล้ว"}`;
-    if (o.pending && !o.scanning) action = btn("อ่านเลย", startScan, "secondary sm");
-    if (o.pending && o.scanning) text += " (เริ่มหลังสแกนไฟล์เสร็จ)";
+    text = `OCR อัตโนมัติ · อ่านแล้ว ${n(o.done)}${o.pending ? ` · รออ่าน ${n(o.pending)}` : " · ครบแล้ว"}`;
+    if (o.pending && !o.scanning) action = btn("อ่านเลย", startScan, "ghost sm");
   }
-  row.append(head, sw, el("span", { class: "fp-ocr-text", title: text }, text), action || "", bar || "");
+  row.append(icon("scan"), el("span", { class: "fp-row-text", title: text }, text), action || "", sw);
   return row;
 }
 
@@ -1466,7 +1490,7 @@ const GUIDE = [
   { key: "search", icon: "search", color: "file", title: "ค้นหาทุกอย่าง", target: ".input.search",
     text: "พิมพ์คำเดียว เจอทั้งชื่อไฟล์ เนื้อหาในไฟล์ โน้ต ลิงก์ และรหัสผ่าน ภาษาไทยที่เขียนติดกันก็เจอ กด / เพื่อเริ่มพิมพ์ได้ทันที" },
   { key: "folders", icon: "folder", color: "bookmark", title: "เลือกโฟลเดอร์ที่ค้นหา", target: "#folder-panel",
-    text: "หน้าแรกบอกว่าค้นในโฟลเดอร์ไหน มีกี่ไฟล์ และกำลังสแกนโฟลเดอร์ไหนอยู่ กด เพิ่มโฟลเดอร์ เพื่อเลือกโฟลเดอร์ใหม่ หรือ × เพื่อเอาออก" },
+    text: "หน้าแรกบอกว่าค้นในโฟลเดอร์ไหน มีกี่ไฟล์ และกำลังสแกนอยู่ไหม กด จัดการ แล้วกด เพิ่มโฟลเดอร์ เพื่อเลือกโฟลเดอร์ใหม่ หรือ × เพื่อเอาออก" },
   { key: "add", icon: "plus", color: "note", title: "เพิ่มข้อมูล", target: "#add-btn",
     text: "ปุ่ม เพิ่ม: อัปโหลดไฟล์ จดโน้ต เก็บลิงก์ หรือเก็บรหัสผ่าน ทุกอย่างค้นเจอทันทีที่บันทึก" },
   { key: "upload", icon: "upload", color: "bookmark", title: "อัปโหลด & ลากวาง", target: "#main",
