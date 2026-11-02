@@ -263,7 +263,10 @@ mark { background: var(--color-mark); color: inherit; border-radius: 3px; paddin
 :root[data-filters="rail"] .filter-item.active { font-size: 30px; font-weight: 500; color: var(--color-text-heading); }
 
 /* ============================================================== results */
-#results { list-style: none; margin: 0; padding: 0 0 var(--space-6); display: grid; gap: var(--row-gap); align-content: start; }
+/* A flex column whose rows never shrink, not a grid: in the Mac app's WebKit view the grid's
+   auto rows shrank to slivers once the list was taller than its scroll area, and the rows overlapped. */
+#results { list-style: none; margin: 0; padding: 0 0 var(--space-6); display: flex; flex-direction: column; gap: var(--row-gap); }
+#results > li { flex: 0 0 auto; }
 #results li.row {
   display: flex; gap: var(--space-2); align-items: center; padding: var(--row-pad) var(--space-1-5); cursor: pointer;
   border: 1px solid transparent; border-radius: var(--radius-element);
@@ -297,10 +300,6 @@ mark { background: var(--color-mark); color: inherit; border-radius: 3px; paddin
 .row .snip { font-size: 13px; color: var(--color-text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 :root[data-density="compact"] .row .meta { font-size: 12px; }
 :root[data-density="compact"] .row .snip { -webkit-line-clamp: 1; }
-/* Rows always take their real height. (content-visibility: auto here collapsed every
-   row to almost nothing in the Mac app's WebKit view, so the names overlapped; the list
-   pages in 50 rows at a time anyway.) */
-#results li.row { flex-shrink: 0; }
 .load-more { list-style: none; display: flex; align-items: center; justify-content: center; gap: var(--space-1-5);
   min-height: 56px; color: var(--color-text-secondary); font-size: 13.5px; }
 .load-more.end { color: var(--color-text-disabled); }
