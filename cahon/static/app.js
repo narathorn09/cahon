@@ -727,8 +727,24 @@ function resultMeta(r) {
   return [fmtShortDate(r.updated_at), ...(r.tags || []).map((t) => `#${t}`)];
 }
 
+/** For a file found by its folder name ("test" in …/load-test/k6.png): the folders
+    from the one that matched to the file, so the row shows why it is here. */
+function matchedFolder(r, t) {
+  if (r.kind !== "file" || !t.length || !r.path) return null;
+  const title = (r.title || "").toLowerCase();
+  const missing = t.map((w) => w.toLowerCase()).filter((w) => !title.includes(w));
+  if (!missing.length) return null;
+  const parts = r.path.split(/[\\/]/).filter(Boolean).slice(0, -1);
+  let first = -1;
+  parts.forEach((p, k) => { if (first < 0 && missing.some((w) => p.toLowerCase().includes(w))) first = k; });
+  if (first < 0) return null;
+  const sep = r.path.includes("\\") && !r.path.includes("/") ? "\\" : "/";
+  return (first > 0 ? "…" + sep : "") + parts.slice(first).join(sep) + sep;
+}
+
 function rowEl(r, i, t, animate) {
   const meta = resultMeta(r).filter(Boolean);
+  const folder = matchedFolder(r, t);
   return el("li", {
     class: `row${animate ? " reveal" : ""}${i === state.selected ? " selected" : ""}`, style: animate ? `--i:${Math.min(i, 12)}` : null,
     onclick: () => { select(i); if (!isSide()) openDetail(); },
@@ -738,6 +754,7 @@ function rowEl(r, i, t, animate) {
     el("div", { class: "copy" },
       el("div", { class: "title" }, highlight(r.title, t)),
       meta.length ? el("div", { class: "meta" }, meta.map((m, j) => el("span", { class: j ? "dot" : "" }, highlight(m, t)))) : null,
+      folder ? el("div", { class: "where", title: `เจอในชื่อโฟลเดอร์: ${r.path}` }, icon("folder"), el("span", {}, highlight(folder, t))) : null,
       r.snippet && r.kind !== "password" && t.length ? el("div", { class: "snip" }, highlight(r.snippet, t)) : null),
     canView(r) ? el("div", { class: "row-actions" },
       btn("ดูเนื้อหา", (e) => { e.stopPropagation(); openViewer(r); }, "secondary sm", "lines", { title: "ดูเนื้อหาพร้อมเลขบรรทัด" })) : null);

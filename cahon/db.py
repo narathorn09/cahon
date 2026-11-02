@@ -162,6 +162,16 @@ SORTS = {
 }
 
 
+def _name_tier(title: str, terms: list[str]) -> int:
+    """Rank of a match on the name or path: 0 when every word is in the file name itself,
+    1 when some word is only in the folder path (…/load-test/k6.png for "test")."""
+    t = (title or "").casefold()
+    return 0 if all(w.casefold() in t for w in terms) else 1
+
+
+CONTENT_TIER = 2  # found only inside the text: after name and path matches
+
+
 def split_terms(query: str) -> tuple[list[str], list[str]]:
     terms = [t for t in query.split() if t]
     return [t for t in terms if len(t) >= 3], [t for t in terms if len(t) < 3]
@@ -269,7 +279,7 @@ class FileShard:
                     (*short_params, NAME_CAP + 1),
                 ).fetchall()
                 complete = len(rows) <= NAME_CAP
-                hits = [(r, 0) for r in rows[:NAME_CAP]]
+                hits = [(r, _name_tier(r["title"], short_terms)) for r in rows[:NAME_CAP]]
             else:
                 match = _match(long_terms)
                 extra = f" AND {short_sql}" if short_sql else ""
@@ -280,7 +290,9 @@ class FileShard:
                 complete = len(name_rows) <= NAME_CAP and len(body_rows) <= CANDIDATES
                 name_rows, body_rows = name_rows[:NAME_CAP], body_rows[:CANDIDATES]
                 seen = {r["id"] for r in name_rows}
-                hits = [(r, 0) for r in name_rows] + [(r, 1) for r in body_rows if r["id"] not in seen]
+                words = long_terms + short_terms
+                hits = [(r, _name_tier(r["title"], words)) for r in name_rows] + \
+                       [(r, CONTENT_TIER) for r in body_rows if r["id"] not in seen]
             hits.sort(key=lambda h: (h[1], -h[0]["mtime"]))
         return [self._as_item(r, rank=(tier, -r["mtime"])) for r, tier in hits], complete
 
@@ -299,16 +311,17 @@ class FileShard:
             try:
                 cols = "f.id, f.title, f.path, f.mtime, f.size, f.indexed_at"
                 if not long_terms:
-                    queries = [(0, f"SELECT {cols} FROM files f WHERE {short_sql}", short_params)]
+                    queries = [(None, f"SELECT {cols} FROM files f WHERE {short_sql}", short_params)]
                 else:
                     match = _match(long_terms)
                     extra = f" AND {short_sql}" if short_sql else ""
                     base = f"SELECT {cols} FROM files_fts JOIN files f ON f.id = files_fts.rowid WHERE files_fts MATCH ?{extra}"
-                    queries = [(0, base, [f"{{title path}} : ({match})", *short_params]), (1, base, [match, *short_params])]
+                    queries = [(None, base, [f"{{title path}} : ({match})", *short_params]), (CONTENT_TIER, base, [match, *short_params])]
                 for tier, sql, params in queries:
                     for r in c.execute(sql, params):
                         if r["id"] not in out:
-                            out[r["id"]] = self._as_item(r, rank=(tier, -r["mtime"]))
+                            t = _name_tier(r["title"], long_terms + short_terms) if tier is None else tier
+                            out[r["id"]] = self._as_item(r, rank=(t, -r["mtime"]))
                         if len(out) >= SNAPSHOT_MAX:
                             interrupted = True
                             break
@@ -803,13 +816,13 @@ class Database:
                 title_rows = self.conn.execute(sql, (f"title : ({match})", *params, limit)).fetchall()
                 all_rows = self.conn.execute(sql, (match, *params, limit)).fetchall()
                 title_ids = {r["id"] for r in title_rows}
-                hits = [(r, 0) for r in title_rows] + [(r, 1) for r in all_rows if r["id"] not in title_ids]
+                hits = [(r, 0) for r in title_rows] + [(r, CONTENT_TIER) for r in all_rows if r["id"] not in title_ids]
             else:
                 rows = self.conn.execute(
                     f"SELECT * FROM items WHERE 1=1{cond} ORDER BY updated_at DESC LIMIT ?", (*params, limit)
                 ).fetchall()
                 first = short_terms[0].lower()
-                hits = [(r, 0 if first in r["title"].lower() else 1) for r in rows]
+                hits = [(r, 0 if first in r["title"].lower() else CONTENT_TIER) for r in rows]
         out = []
         for r, tier in hits:
             item = dict(r)
