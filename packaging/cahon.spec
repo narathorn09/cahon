@@ -22,6 +22,7 @@ ICON = BUILD / "icons" / ("icon.ico" if sys.platform.startswith("win") else "ico
 datas = [(str(ROOT / "cahon" / "static"), "cahon/static")]
 datas += collect_data_files("docx") + collect_data_files("pptx") + collect_data_files("openpyxl")
 datas += collect_data_files("pypdfium2") + collect_data_files("pypdfium2_raw")
+datas += collect_data_files("certifi")  # cacert.pem: HTTPS for the update check on macOS
 binaries = collect_dynamic_libs("pypdfium2_raw")
 tess = BUILD / "tesseract"
 if tess.is_dir():
@@ -30,7 +31,7 @@ if tess.is_dir():
 hiddenimports = (
     collect_submodules("uvicorn")
     + collect_submodules("cahon")
-    + ["cahon_native", "xlrd", "olefile", "multipart", "python_multipart", "webview"]
+    + ["cahon_native", "xlrd", "olefile", "multipart", "python_multipart", "webview", "certifi"]
 )
 
 a = Analysis(

@@ -25,6 +25,7 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -70,10 +71,36 @@ def can_install() -> bool:
     return getattr(sys, "frozen", False) and asset_suffix() is not None
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """HTTPS that verifies GitHub's certificate on every computer.
+
+    The system's trust store first (Windows, Linux, company proxies), plus the
+    certifi bundle that ships with the app: Python on macOS does not read the
+    Keychain, so without it every check failed there with CERTIFICATE_VERIFY_FAILED."""
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception as exc:  # no certifi: the system store alone
+        log.debug("certifi not available: %s", exc)
+    return ctx
+
+
+_SSL = None
+
+
+def _ssl() -> ssl.SSLContext:
+    global _SSL
+    if _SSL is None:
+        _SSL = _ssl_context()
+    return _SSL
+
+
 def _get_json(url: str) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                "User-Agent": f"CAHON/{__version__}"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with urllib.request.urlopen(req, timeout=TIMEOUT, context=_ssl()) as r:
         return json.loads(r.read())
 
 
@@ -200,7 +227,7 @@ class Updater:
         partial = target.with_suffix(target.suffix + ".part")
         digest = hashlib.sha256()
         req = urllib.request.Request(asset["url"], headers={"User-Agent": f"CAHON/{__version__}"})
-        with urllib.request.urlopen(req, timeout=60) as r, partial.open("wb") as out:
+        with urllib.request.urlopen(req, timeout=60, context=_ssl()) as r, partial.open("wb") as out:
             total = int(r.headers.get("Content-Length") or asset.get("size") or 0)
             done = 0
             while chunk := r.read(1 << 20):
