@@ -949,17 +949,26 @@ dialog .note { font-size: var(--text-supporting); color: var(--color-text-second
 }
 
 /* ========================================== home: folders being searched */
-.folder-panel { flex-shrink: 0; display: grid; gap: 10px; margin: 2px 0 10px; padding: 12px 14px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-container); background: var(--color-background-surface); }
+.folder-panel { flex-shrink: 0; display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 0; margin: 2px 0 10px; padding: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-container); background: var(--color-background-surface); overflow: hidden; }
 :root[data-folder-panel="off"] .folder-panel { display: none; }
-.fp-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.fp-head .mascot.small { width: 52px; height: 52px; }
-.fp-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
-.fp-text strong { font-size: 15px; font-weight: 500; color: var(--color-text-heading); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fp-text > span { font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fp-text .progress { height: 5px; margin-top: 5px; }
-.fp-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.fp-folders { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: 76px; overflow-y: auto; }
+.fp-bar { position: relative; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 8px 6px 10px; }
+.fp-bar .mascot.small { width: 34px; height: 34px; flex-shrink: 0; }
+.folder-panel.empty .fp-bar { padding: 12px 14px; gap: 12px; }
+.folder-panel.empty .fp-bar .mascot.small { width: 48px; height: 48px; }
+.fp-text { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.folder-panel.empty .fp-text { display: grid; gap: 2px; }
+.fp-text strong { font-size: 14px; font-weight: 500; color: var(--color-text-heading); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; max-width: 60%; }
+.folder-panel.empty .fp-text strong { font-size: 15px; max-width: none; }
+.fp-text > span { font-size: 12.5px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fp-bar > .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 0; }
+.fp-more { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: 30px; padding: 0 8px 0 12px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.fp-more:hover { background: var(--color-overlay-hover); color: var(--color-text-primary); }
+.fp-more .icon { width: 15px; height: 15px; transition: transform .2s; }
+.fp-more[aria-expanded="true"] .icon { transform: rotate(180deg); }
+.folder-panel.open .fp-bar { border-bottom: 1px solid var(--color-border); }
+.fp-folders { list-style: none; margin: 0; padding: 10px 12px 4px; display: flex; flex-wrap: wrap; gap: 6px; max-height: 92px; overflow-y: auto; }
 .fp-folder { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 4px 0 10px; max-width: 100%;
   border: 1px solid var(--color-border); border-radius: 999px; font-size: 13px; background: var(--color-background-body); }
 .fp-folder .icon { width: 15px; height: 15px; color: var(--color-text-secondary); flex-shrink: 0; }
@@ -973,17 +982,27 @@ dialog .note { font-size: var(--text-supporting); color: var(--color-text-second
   color: var(--color-text-disabled); cursor: pointer; padding: 0; }
 .fp-remove .icon { width: 13px; height: 13px; color: inherit; }
 .fp-remove:hover { background: var(--color-overlay-hover); color: var(--color-text-primary); }
+.fp-add { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px 0 9px; border: 1px dashed var(--color-border);
+  border-radius: 999px; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; cursor: pointer; }
+.fp-add .icon { width: 14px; height: 14px; }
+.fp-add:hover { color: var(--color-text-primary); border-color: var(--color-text-secondary); }
+.fp-row { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 2px 8px 2px 14px; font-size: 13px; }
+.fp-row + .fp-row { border-top: 1px solid var(--color-border); }
+.fp-folders + .fp-row { margin-top: 6px; border-top: 1px solid var(--color-border); }
+.fp-row > .icon { width: 16px; height: 16px; color: var(--color-text-secondary); flex-shrink: 0; }
+.fp-row-text { flex: 1; min-width: 0; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (prefers-reduced-motion: no-preference) {
   .fp-folder.scanning .dot-live { animation: live-pulse 1.2s ease-in-out infinite; }
   @keyframes live-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(26, 127, 55, .45); } 50% { box-shadow: 0 0 0 5px rgba(26, 127, 55, 0); } }
 }
 @media (max-width: 640px) {
+  .fp-text { display: grid; gap: 0; }
+  .fp-text strong { max-width: none; }
   .fp-folders { flex-wrap: nowrap; overflow-x: auto; max-height: none; scrollbar-width: none; padding-right: 24px;
     mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
-  .fp-folder { flex-shrink: 0; }
-  .fp-head { flex-wrap: wrap; }
-  .fp-actions { width: 100%; }
-  .fp-actions .btn { flex: 1; }
+  .fp-folders > li { flex-shrink: 0; }
+  .folder-panel.empty .fp-bar { flex-wrap: wrap; }
+  .folder-panel.empty .fp-bar > .btn { width: 100%; }
 }
 
 /* folder browser (choose a folder inside the app) */
@@ -1044,10 +1063,3 @@ dialog .note { font-size: var(--text-supporting); color: var(--color-text-second
 }
 
 /* home: OCR switch and progress, under the folder chips */
-.fp-ocr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-top: 10px; border-top: 1px dashed var(--color-border); }
-.fp-ocr-head { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; }
-.fp-ocr-head .icon { width: 16px; height: 16px; color: var(--color-text-secondary); }
-.fp-ocr-head strong { font-weight: 500; }
-.fp-ocr-text { flex: 1; min-width: 160px; font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fp-ocr .progress { flex-basis: 100%; height: 5px; }
-.fp-ocr.reading .fp-ocr-head .icon { color: var(--color-mint, #1a7f37); }
